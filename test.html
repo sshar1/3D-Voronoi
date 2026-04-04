@@ -24,18 +24,19 @@
 </head>
 <body>
 
-<!-- Vertex Shader -->
-<script id="vshader" type="x-shader/x-vertex">
-    attribute vec3 aPosition;
-    attribute vec3 aNormal;
-    attribute vec3 aColor;
+<!-- ============ Box Shaders (GLSL 300 es) ============ -->
+
+<script id="vshader-box" type="x-shader/x-vertex">#version 300 es
+    in vec3 aPosition;
+    in vec3 aNormal;
+    in vec3 aColor;
 
     uniform mat4 uModelViewProjection;
     uniform mat4 uNormalMatrix;
     uniform vec3 uLightDir;
 
-    varying float vDot;
-    varying vec3 vColor;
+    out float vDot;
+    out vec3 vColor;
 
     void main() {
         gl_Position = uModelViewProjection * vec4(aPosition, 1.0);
@@ -45,17 +46,76 @@
     }
 </script>
 
-<!-- Fragment Shader -->
-<script id="fshader" type="x-shader/x-fragment">
+<script id="fshader-box" type="x-shader/x-fragment">#version 300 es
     precision mediump float;
 
-    varying float vDot;
-    varying vec3 vColor;
+    in float vDot;
+    in vec3 vColor;
+    out vec4 fragColor;
 
     void main() {
-        vec3 ambient = vColor * 0.15;
-        vec3 diffuse = vColor * vDot;
-        gl_FragColor = vec4(ambient + diffuse, 1.0);
+        fragColor = vec4(vColor, 1.0);
+    }
+</script>
+
+<!-- ============ Voronoi Shaders (GLSL 300 es) ============ -->
+
+<script id="vshader-voronoi" type="x-shader/x-vertex">#version 300 es
+    #define MAX_POINTS 64
+
+    in vec3 aPosition;
+
+    uniform mat4 uModelViewProjection;
+
+    // Uniform Block: array of Voronoi seed points
+    layout(std140) uniform VoronoiPoints {
+        int  uNumPoints;             // 16 bytes (std140 pads int to 16)
+        vec4 uPoints[MAX_POINTS];    // vec4 for std140 alignment, use .xyz
+    };
+
+    out vec3 vWorldPos;
+
+    void main() {
+        vWorldPos = aPosition;
+        gl_Position = uModelViewProjection * vec4(aPosition, 1.0);
+        gl_PointSize = 6.0;
+    }
+</script>
+
+<script id="fshader-voronoi" type="x-shader/x-fragment">#version 300 es
+    precision highp float;
+    precision highp int;
+
+    #define MAX_POINTS 64
+
+    // Same uniform block available in fragment shader
+    layout(std140) uniform VoronoiPoints {
+        int  uNumPoints;
+        vec4 uPoints[MAX_POINTS];
+    };
+
+    in vec3 vWorldPos;
+    out vec4 fragColor;
+
+    void main() {
+        // Find the closest Voronoi seed point to this fragment's world position
+        float minDist = 1e10;
+        int closestIdx = 0;
+
+        for (int i = 0; i < MAX_POINTS; i++) {
+            if (i >= uNumPoints) break;
+            float d = distance(vWorldPos, uPoints[i].xyz);
+            if (d < minDist) {
+                minDist = d;
+                closestIdx = i;
+            }
+        }
+
+        // Color based on closest point index (simple hash)
+        float hue = float(closestIdx) * 0.618033988749895;
+        vec3 color = 0.5 + 0.5 * cos(6.2831853 * (hue + vec3(0.0, 0.33, 0.67)));
+
+        fragColor = vec4(color, 1.0);
     }
 </script>
 

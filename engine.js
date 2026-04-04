@@ -142,8 +142,9 @@ function createBox() {
             normals.push(...face.n);
             colors.push(...face.color);
         });
-        // Two triangles per face
-        indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+
+        // Lines
+        indices.push(base, base + 1, base + 1, base + 2, base + 2, base + 3, base + 3, base);
     });
 
     return {
@@ -210,27 +211,108 @@ function setAttribute(gl, buffer, location, size) {
 //  Main
 // ============================================================
 
+// ============================================================
+//  UBO helpers (WebGL 2)
+// ============================================================
+
+const MAX_POINTS = 64;
+// std140 layout: 16 bytes for int (padded), then 64 * 16 bytes for vec4 array
+const UBO_SIZE = 16 + MAX_POINTS * 16;
+const VORONOI_BINDING_POINT = 0;
+
+function createVoronoiUBO(gl) {
+    const ubo = gl.createBuffer();
+    gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
+    gl.bufferData(gl.UNIFORM_BUFFER, UBO_SIZE, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+    // Bind the buffer to binding point 0
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, VORONOI_BINDING_POINT, ubo);
+    return ubo;
+}
+
+function bindVoronoiUBOToProgram(gl, program) {
+    const blockIndex = gl.getUniformBlockIndex(program, "VoronoiPoints");
+    if (blockIndex !== gl.INVALID_INDEX) {
+        gl.uniformBlockBinding(program, blockIndex, VORONOI_BINDING_POINT);
+    }
+}
+
+// Upload an array of [x,y,z] points to the UBO
+function updateVoronoiPoints(gl, ubo, points) {
+    const count = Math.min(points.length, MAX_POINTS);
+
+    // Build the std140-aligned buffer:
+    // Bytes 0-3:   int numPoints
+    // Bytes 4-15:  padding
+    // Bytes 16+:   vec4[MAX_POINTS] (each 16 bytes, w unused)
+    const buffer = new ArrayBuffer(UBO_SIZE);
+    const intView = new Int32Array(buffer, 0, 1);
+    const floatView = new Float32Array(buffer);
+
+    intView[0] = count;
+
+    for (let i = 0; i < count; i++) {
+        const offset = 4 + i * 4;  // float index: skip 4 floats (16 bytes) for the int, then 4 per vec4
+        floatView[offset]     = points[i][0];
+        floatView[offset + 1] = points[i][1];
+        floatView[offset + 2] = points[i][2];
+        floatView[offset + 3] = 0.0;  // w padding
+    }
+
+    gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
+    gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(buffer));
+    gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+}
+
+
+// ============================================================
+//  Main
+// ============================================================
+
 (function main() {
     const canvas = document.getElementById("glcanvas");
-    const gl = canvas.getContext("webgl");
+    const gl = canvas.getContext("webgl2");
     if (!gl) {
-        alert("WebGL not supported");
+        alert("WebGL 2 not supported");
         return;
     }
 
-    // ---- Shader program ----
-    const program = createProgram(gl, "vshader", "fshader");
-    gl.useProgram(program);
+    // ---- Shader programs ----
+    const box_program = createProgram(gl, "vshader-box", "fshader-box");
+    const voronoi_program = createProgram(gl, "vshader-voronoi", "fshader-voronoi");
 
+    // ---- Voronoi UBO setup ----
+    const voronoiUBO = createVoronoiUBO(gl);
+    bindVoronoiUBOToProgram(gl, voronoi_program);
+
+    // Upload some initial test points inside the [-1, 1] cube
+    const testPoints = [
+        [ 0.5,  0.3,  0.2],
+        [-0.4,  0.7, -0.3],
+        [ 0.1, -0.6,  0.8],
+        [-0.8,  0.2,  0.5],
+        [ 0.3, -0.4, -0.7],
+        [-0.2, -0.8,  0.1],
+        [ 0.7,  0.5, -0.4],
+        [-0.6,  0.1,  0.9],
+    ];
+    updateVoronoiPoints(gl, voronoiUBO, testPoints);
+
+
+    // ---- Box VAO ----
+    const box_vao = gl.createVertexArray();
+    gl.useProgram(box_program);
+    gl.bindVertexArray(box_vao);
     // ---- Attribute locations ----
-    const aPosition = gl.getAttribLocation(program, "aPosition");
-    const aNormal   = gl.getAttribLocation(program, "aNormal");
-    const aColor    = gl.getAttribLocation(program, "aColor");
+    const aPosition = gl.getAttribLocation(box_program, "aPosition");
+    const aNormal   = gl.getAttribLocation(box_program, "aNormal");
+    const aColor    = gl.getAttribLocation(box_program, "aColor");
 
     // ---- Uniform locations ----
-    const uMVP       = gl.getUniformLocation(program, "uModelViewProjection");
-    const uNormal    = gl.getUniformLocation(program, "uNormalMatrix");
-    const uLightDir  = gl.getUniformLocation(program, "uLightDir");
+    const uMVP       = gl.getUniformLocation(box_program, "uModelViewProjection");
+    const uNormal    = gl.getUniformLocation(box_program, "uNormalMatrix");
+    const uLightDir  = gl.getUniformLocation(box_program, "uLightDir");
 
     // ---- Geometry ----
     const box = createBox();
@@ -246,6 +328,21 @@ function setAttribute(gl, buffer, location, size) {
 
     // ---- Light ----
     gl.uniform3f(uLightDir, 0, 0.7, 1.0);
+
+    gl.bindVertexArray(null);
+
+    // ---- Voronoi VAO ----
+    const voronoi_vao = gl.createVertexArray();
+    gl.useProgram(voronoi_program);
+    gl.bindVertexArray(voronoi_vao);
+
+    const aPosition_voronoi = gl.getAttribLocation(voronoi_program, "aPosition");
+    const uMVP_voronoi = gl.getUniformLocation(voronoi_program, "uModelViewProjection");
+
+    const voronoi_buf = createBuffer(gl, gl.ARRAY_BUFFER, new Float32Array(testPoints.flat()));
+    setAttribute(gl, voronoi_buf, aPosition_voronoi, 3);
+
+    gl.bindVertexArray(null);
 
     // ---- GL state ----
     gl.clearColor(0.04, 0.04, 0.06, 1.0);
@@ -325,10 +422,20 @@ function setAttribute(gl, buffer, location, size) {
         mat4InverseTranspose(norm, mv);
 
         // Draw
+        gl.bindVertexArray(box_vao);
+        gl.useProgram(box_program)
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         gl.uniformMatrix4fv(uMVP, false, mvp);
         gl.uniformMatrix4fv(uNormal, false, norm);
-        gl.drawElements(gl.TRIANGLES, box.count, gl.UNSIGNED_SHORT, 0);
+        gl.drawElements(gl.LINES, box.count, gl.UNSIGNED_SHORT, 0);
+
+        gl.disable(gl.CULL_FACE);
+        gl.bindVertexArray(voronoi_vao);
+        gl.useProgram(voronoi_program);
+        gl.uniformMatrix4fv(uMVP_voronoi, false, mvp);
+        gl.drawArrays(gl.POINTS, 0, testPoints.length);
+        gl.bindVertexArray(null);
+        gl.enable(gl.CULL_FACE);
 
         requestAnimationFrame(frame);
     }
