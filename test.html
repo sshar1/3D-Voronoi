@@ -20,6 +20,35 @@
             border-radius: 12px;
             touch-action: none;
         }
+        #sidebar {
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 300px;
+            height: 100%;
+            background: rgba(20, 20, 30, 0.9);
+            padding: 20px;
+            overflow-y: auto;
+            border-left: 1px solid #333;
+            color: #ddd;
+            font-family: sans-serif;
+            z-index: 10;
+        }
+        #sidebar h3 {
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        .seed-toggle {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .seed-toggle input {
+            margin-right: 12px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -94,8 +123,19 @@
         vec4 uPoints[MAX_POINTS];
     };
 
+    uniform uint uSeedMaskLow;
+    uniform uint uSeedMaskHigh;
+
     in vec3 vWorldPos;
     out vec4 fragColor;
+
+    bool isEnabled(int index) {
+        if (index < 32) {
+            return ((uSeedMaskLow >> uint(index)) & 1u) != 0u;
+        } else {
+            return ((uSeedMaskHigh >> uint(index - 32)) & 1u) != 0u;
+        }
+    }
 
     void main() {
         // Find the closest Voronoi seed point to this fragment's world position
@@ -104,20 +144,29 @@
 
         for (int i = 0; i < MAX_POINTS; i++) {
             if (i >= uNumPoints) break;
-            float d = distance(vWorldPos, uPoints[i].xyz);
+            //float d = distance(vWorldPos, uPoints[i].xyz);
+            float d = dot(vWorldPos - uPoints[i].xyz, vWorldPos - uPoints[i].xyz);
             if (d < minDist) {
                 minDist = d;
                 closestIdx = i;
             }
         }
 
-        // Color based on closest point index (simple hash)
-        float hue = float(closestIdx) * 0.618033988749895;
-        vec3 color = 0.5 + 0.5 * cos(6.2831853 * (hue + vec3(0.0, 0.33, 0.67)));
-
-        fragColor = vec4(color, 1.0);
+        if (minDist < 0.003) {
+            fragColor = vec4(1.0, 1.0, 1.0, 1.0);
+        } else if (isEnabled(closestIdx)) {
+            // Color based on closest point index (simple hash)
+            float hue = float(closestIdx) * 0.618033988749895;
+            vec3 color = 0.5 + 0.5 * cos(6.2831853 * (hue + vec3(0.0, 0.33, 0.67)));
+            fragColor = vec4(color, 1.0);
+        }
     }
 </script>
+
+<div id="sidebar">
+    <h3>Seed Points</h3>
+    <div id="seed-list"></div>
+</div>
 
 <canvas id="glcanvas"></canvas>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>

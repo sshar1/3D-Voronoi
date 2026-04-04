@@ -239,30 +239,71 @@ function bindVoronoiUBOToProgram(gl, program) {
 }
 
 // Upload an array of [x,y,z] points to the UBO
-function updateVoronoiPoints(gl, ubo, points) {
+function updateVoronoiPoints(gl, ubo, points, enables) {
     const count = Math.min(points.length, MAX_POINTS);
 
     // Build the std140-aligned buffer:
     // Bytes 0-3:   int numPoints
-    // Bytes 4-15:  padding
+    // Bytes 4-11:  uint64_t seedMask
+    // Bytes 12-15: padding
     // Bytes 16+:   vec4[MAX_POINTS] (each 16 bytes, w unused)
     const buffer = new ArrayBuffer(UBO_SIZE);
-    const intView = new Int32Array(buffer, 0, 1);
-    const floatView = new Float32Array(buffer);
+    const dataView = new DataView(buffer);
+    dataView.setInt32(0, count, true); // numPoints at offset 0
 
-    intView[0] = count;
+    // let maskLow = 0;
+    // for (let i = 0; i < 32; i++) {
+    //     if (enables[i]) maskLow |= (1 << i);
+    // }
+    // dataView.setUint32(4, maskLow, true); // uSeedMaskLow at offset 4
 
+    // let maskHigh = 0;
+    // for (let i = 0; i < 32; i++) {
+    //     if (enables[i + 32]) maskHigh |= (1 << i);
+    // }
+    // dataView.setUint32(8, maskHigh, true); // uSeedMaskHigh at offset 8
+
+    // Offset 12: padding
+    // Offset 16 onwards: points array (vec4[64])
     for (let i = 0; i < count; i++) {
-        const offset = 4 + i * 4;  // float index: skip 4 floats (16 bytes) for the int, then 4 per vec4
-        floatView[offset]     = points[i][0];
-        floatView[offset + 1] = points[i][1];
-        floatView[offset + 2] = points[i][2];
-        floatView[offset + 3] = 0.0;  // w padding
+        const offset = 16 + i * 16;
+        dataView.setFloat32(offset,     points[i][0], true);
+        dataView.setFloat32(offset + 4, points[i][1], true);
+        dataView.setFloat32(offset + 8, points[i][2], true);
+        dataView.setFloat32(offset + 12, 0.0, true);
     }
 
     gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(buffer));
     gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+}
+
+function updateVoronoiMask(gl, low_uniform, high_uniform, enables) {
+    let maskLow = 0;
+    for (let i = 0; i < 32; i++) {
+        if (enables[i]) maskLow |= (1 << i);
+    }
+
+    let maskHigh = 0;
+    for (let i = 0; i < 32; i++) {
+        if (enables[i + 32]) maskHigh |= (1 << i);
+    }
+
+    gl.uniform1ui(low_uniform, maskLow);
+    gl.uniform1ui(high_uniform, maskHigh);
+}
+
+function createVoronoiPoints(resolution) {
+    const points = [];
+    for (let x = -1; x <= 1; x += resolution) {
+        for (let y = -1; y <= 1; y += resolution) {
+            for (let z = -1; z <= 1; z += resolution) {
+                points.push([x, y, z]);
+            }
+        }
+    }
+
+    return points;
 }
 
 
@@ -278,6 +319,8 @@ function updateVoronoiPoints(gl, ubo, points) {
         return;
     }
 
+    const point_resolution = 0.05;
+
     // ---- Shader programs ----
     const box_program = createProgram(gl, "vshader-box", "fshader-box");
     const voronoi_program = createProgram(gl, "vshader-voronoi", "fshader-voronoi");
@@ -287,7 +330,7 @@ function updateVoronoiPoints(gl, ubo, points) {
     bindVoronoiUBOToProgram(gl, voronoi_program);
 
     // Upload some initial test points inside the [-1, 1] cube
-    const testPoints = [
+    const seeds = [
         [ 0.5,  0.3,  0.2],
         [-0.4,  0.7, -0.3],
         [ 0.1, -0.6,  0.8],
@@ -296,9 +339,10 @@ function updateVoronoiPoints(gl, ubo, points) {
         [-0.2, -0.8,  0.1],
         [ 0.7,  0.5, -0.4],
         [-0.6,  0.1,  0.9],
+        [0, 0, 0],
     ];
-    updateVoronoiPoints(gl, voronoiUBO, testPoints);
-
+    const enables = Array(64).fill(true);
+    updateVoronoiPoints(gl, voronoiUBO, seeds, enables);
 
     // ---- Box VAO ----
     const box_vao = gl.createVertexArray();
@@ -336,11 +380,35 @@ function updateVoronoiPoints(gl, ubo, points) {
     gl.useProgram(voronoi_program);
     gl.bindVertexArray(voronoi_vao);
 
+    const voronoi_points = new Float32Array(createVoronoiPoints(point_resolution).flat());
+    const points_buffer = createBuffer(gl, gl.ARRAY_BUFFER, voronoi_points);
     const aPosition_voronoi = gl.getAttribLocation(voronoi_program, "aPosition");
     const uMVP_voronoi = gl.getUniformLocation(voronoi_program, "uModelViewProjection");
+    const low_mask_voronoi = gl.getUniformLocation(voronoi_program, "uSeedMaskLow");
+    const high_mask_voronoi = gl.getUniformLocation(voronoi_program, "uSeedMaskHigh");
+    updateVoronoiMask(gl, low_mask_voronoi, high_mask_voronoi, enables);
 
-    const voronoi_buf = createBuffer(gl, gl.ARRAY_BUFFER, new Float32Array(testPoints.flat()));
-    setAttribute(gl, voronoi_buf, aPosition_voronoi, 3);
+    // ---- Sidebar UI ----
+    const seedList = document.getElementById("seed-list");
+    for (let i = 0; i < seeds.length; i++) {
+        const row = document.createElement("label");
+        row.className = "seed-toggle";
+        
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = enables[i];
+        cb.onchange = (e) => {
+            enables[i] = e.target.checked;
+            gl.useProgram(voronoi_program);
+            updateVoronoiMask(gl, low_mask_voronoi, high_mask_voronoi, enables);
+        };
+        
+        row.appendChild(cb);
+        row.appendChild(document.createTextNode(`Seed ${i} (${seeds[i].join(', ')})`));
+        seedList.appendChild(row);
+    }
+
+    setAttribute(gl, points_buffer, aPosition_voronoi, 3);
 
     gl.bindVertexArray(null);
 
@@ -433,7 +501,7 @@ function updateVoronoiPoints(gl, ubo, points) {
         gl.bindVertexArray(voronoi_vao);
         gl.useProgram(voronoi_program);
         gl.uniformMatrix4fv(uMVP_voronoi, false, mvp);
-        gl.drawArrays(gl.POINTS, 0, testPoints.length);
+        gl.drawArrays(gl.POINTS, 0, voronoi_points.length / 3);
         gl.bindVertexArray(null);
         gl.enable(gl.CULL_FACE);
 
