@@ -251,18 +251,6 @@ function updateVoronoiPoints(gl, ubo, points, enables) {
     const dataView = new DataView(buffer);
     dataView.setInt32(0, count, true); // numPoints at offset 0
 
-    // let maskLow = 0;
-    // for (let i = 0; i < 32; i++) {
-    //     if (enables[i]) maskLow |= (1 << i);
-    // }
-    // dataView.setUint32(4, maskLow, true); // uSeedMaskLow at offset 4
-
-    // let maskHigh = 0;
-    // for (let i = 0; i < 32; i++) {
-    //     if (enables[i + 32]) maskHigh |= (1 << i);
-    // }
-    // dataView.setUint32(8, maskHigh, true); // uSeedMaskHigh at offset 8
-
     // Offset 12: padding
     // Offset 16 onwards: points array (vec4[64])
     for (let i = 0; i < count; i++) {
@@ -348,6 +336,7 @@ function createVoronoiPoints(resolution) {
     const box_vao = gl.createVertexArray();
     gl.useProgram(box_program);
     gl.bindVertexArray(box_vao);
+
     // ---- Attribute locations ----
     const aPosition = gl.getAttribLocation(box_program, "aPosition");
     const aNormal   = gl.getAttribLocation(box_program, "aNormal");

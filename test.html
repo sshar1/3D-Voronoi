@@ -163,6 +163,12 @@
     }
 </script>
 
+<!--TODO
+Instead of drawing the gl_points, we will output the colors to a 3d texutre.
+This 3d texture is used as a lookup table for the second shader in the pipeline
+that casts a ray from the camera to every pixel on the surface of the box.
+-->
+
 <div id="sidebar">
     <h3>Seed Points</h3>
     <div id="seed-list"></div>
