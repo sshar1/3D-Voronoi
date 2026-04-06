@@ -208,10 +208,6 @@ function setAttribute(gl, buffer, location, size) {
 
 
 // ============================================================
-//  Main
-// ============================================================
-
-// ============================================================
 //  UBO helpers (WebGL 2)
 // ============================================================
 
@@ -239,20 +235,17 @@ function bindVoronoiUBOToProgram(gl, program) {
 }
 
 // Upload an array of [x,y,z] points to the UBO
-function updateVoronoiPoints(gl, ubo, points, enables) {
+function updateVoronoiPoints(gl, ubo, points) {
     const count = Math.min(points.length, MAX_POINTS);
 
     // Build the std140-aligned buffer:
     // Bytes 0-3:   int numPoints
-    // Bytes 4-11:  uint64_t seedMask
-    // Bytes 12-15: padding
+    // Bytes 4-15:  padding
     // Bytes 16+:   vec4[MAX_POINTS] (each 16 bytes, w unused)
     const buffer = new ArrayBuffer(UBO_SIZE);
     const dataView = new DataView(buffer);
-    dataView.setInt32(0, count, true); // numPoints at offset 0
+    dataView.setInt32(0, count, true);
 
-    // Offset 12: padding
-    // Offset 16 onwards: points array (vec4[64])
     for (let i = 0; i < count; i++) {
         const offset = 16 + i * 16;
         dataView.setFloat32(offset,     points[i][0], true);
@@ -266,32 +259,29 @@ function updateVoronoiPoints(gl, ubo, points, enables) {
     gl.bindBuffer(gl.UNIFORM_BUFFER, null);
 }
 
-function updateVoronoiMask(gl, low_uniform, high_uniform, enables) {
-    let maskLow = 0;
-    for (let i = 0; i < 32; i++) {
-        if (enables[i]) maskLow |= (1 << i);
+
+// ============================================================
+//  3D Texture baking
+// ============================================================
+
+function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSliceZ) {
+    gl.useProgram(program);
+    gl.bindVertexArray(vao);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.viewport(0, 0, textureSize, textureSize);
+    gl.disable(gl.DEPTH_TEST);
+
+    for (let z = 0; z < textureSize; z++) {
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, texture, 0, z);
+        const zNorm = -1.0 + (2.0 * (z + 0.5)) / textureSize;
+        gl.uniform1f(uSliceZ, zNorm);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
-    let maskHigh = 0;
-    for (let i = 0; i < 32; i++) {
-        if (enables[i + 32]) maskHigh |= (1 << i);
-    }
-
-    gl.uniform1ui(low_uniform, maskLow);
-    gl.uniform1ui(high_uniform, maskHigh);
-}
-
-function createVoronoiPoints(resolution) {
-    const points = [];
-    for (let x = -1; x <= 1; x += resolution) {
-        for (let y = -1; y <= 1; y += resolution) {
-            for (let z = -1; z <= 1; z += resolution) {
-                points.push([x, y, z]);
-            }
-        }
-    }
-
-    return points;
+    // Restore screen render state
+    gl.bindVertexArray(null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.enable(gl.DEPTH_TEST);
 }
 
 
@@ -307,17 +297,9 @@ function createVoronoiPoints(resolution) {
         return;
     }
 
-    const point_resolution = 0.05;
+    const texture_size = 64;
 
-    // ---- Shader programs ----
-    const box_program = createProgram(gl, "vshader-box", "fshader-box");
-    const voronoi_program = createProgram(gl, "vshader-voronoi", "fshader-voronoi");
-
-    // ---- Voronoi UBO setup ----
-    const voronoiUBO = createVoronoiUBO(gl);
-    bindVoronoiUBOToProgram(gl, voronoi_program);
-
-    // Upload some initial test points inside the [-1, 1] cube
+    // ---- Seeds ----
     const seeds = [
         [ 0.5,  0.3,  0.2],
         [-0.4,  0.7, -0.3],
@@ -330,76 +312,88 @@ function createVoronoiPoints(resolution) {
         [0, 0, 0],
     ];
     const enables = Array(64).fill(true);
-    updateVoronoiPoints(gl, voronoiUBO, seeds, enables);
+
+    // ---- Shader programs ----
+    const boxProgram   = createProgram(gl, "vshader-box", "fshader-box");
+    const bakerProgram = createProgram(gl, "texture-baker-vertex", "texture-baker-fragment");
+
+    // ---- UBO setup ----
+    const voronoiUBO = createVoronoiUBO(gl);
+    bindVoronoiUBOToProgram(gl, bakerProgram);
+    updateVoronoiPoints(gl, voronoiUBO, seeds);
 
     // ---- Box VAO ----
-    const box_vao = gl.createVertexArray();
-    gl.useProgram(box_program);
-    gl.bindVertexArray(box_vao);
+    const boxVao = gl.createVertexArray();
+    gl.bindVertexArray(boxVao);
+    gl.useProgram(boxProgram);
 
-    // ---- Attribute locations ----
-    const aPosition = gl.getAttribLocation(box_program, "aPosition");
-    const aNormal   = gl.getAttribLocation(box_program, "aNormal");
-    const aColor    = gl.getAttribLocation(box_program, "aColor");
-
-    // ---- Uniform locations ----
-    const uMVP       = gl.getUniformLocation(box_program, "uModelViewProjection");
-    const uNormal    = gl.getUniformLocation(box_program, "uNormalMatrix");
-    const uLightDir  = gl.getUniformLocation(box_program, "uLightDir");
-
-    // ---- Geometry ----
     const box = createBox();
     const posBuf = createBuffer(gl, gl.ARRAY_BUFFER, box.positions);
     const nrmBuf = createBuffer(gl, gl.ARRAY_BUFFER, box.normals);
     const colBuf = createBuffer(gl, gl.ARRAY_BUFFER, box.colors);
     const idxBuf = createBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, box.indices);
 
-    setAttribute(gl, posBuf, aPosition, 3);
-    setAttribute(gl, nrmBuf, aNormal, 3);
-    setAttribute(gl, colBuf, aColor, 3);
+    setAttribute(gl, posBuf, gl.getAttribLocation(boxProgram, "aPosition"), 3);
+    setAttribute(gl, nrmBuf, gl.getAttribLocation(boxProgram, "aNormal"),   3);
+    setAttribute(gl, colBuf, gl.getAttribLocation(boxProgram, "aColor"),    3);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
 
-    // ---- Light ----
+    const uMVP     = gl.getUniformLocation(boxProgram, "uModelViewProjection");
+    const uNormal  = gl.getUniformLocation(boxProgram, "uNormalMatrix");
+    const uLightDir = gl.getUniformLocation(boxProgram, "uLightDir");
     gl.uniform3f(uLightDir, 0, 0.7, 1.0);
 
     gl.bindVertexArray(null);
 
-    // ---- Voronoi VAO ----
-    const voronoi_vao = gl.createVertexArray();
-    gl.useProgram(voronoi_program);
-    gl.bindVertexArray(voronoi_vao);
+    // ---- Baker VAO (full-screen quad) ----
+    const bakerVao = gl.createVertexArray();
+    gl.bindVertexArray(bakerVao);
 
-    const voronoi_points = new Float32Array(createVoronoiPoints(point_resolution).flat());
-    const points_buffer = createBuffer(gl, gl.ARRAY_BUFFER, voronoi_points);
-    const aPosition_voronoi = gl.getAttribLocation(voronoi_program, "aPosition");
-    const uMVP_voronoi = gl.getUniformLocation(voronoi_program, "uModelViewProjection");
-    const low_mask_voronoi = gl.getUniformLocation(voronoi_program, "uSeedMaskLow");
-    const high_mask_voronoi = gl.getUniformLocation(voronoi_program, "uSeedMaskHigh");
-    updateVoronoiMask(gl, low_mask_voronoi, high_mask_voronoi, enables);
+    const quadVerts = new Float32Array([
+        -1, -1,   1, -1,   1, 1,
+        -1, -1,   1,  1,  -1, 1,
+    ]);
+    const quadBuf = createBuffer(gl, gl.ARRAY_BUFFER, quadVerts);
+    setAttribute(gl, quadBuf, gl.getAttribLocation(bakerProgram, "aPosition"), 2);
+
+    gl.bindVertexArray(null);
+
+    // ---- 3D Texture ----
+    const voronoiTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, voronoiTexture);
+    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA8, texture_size, texture_size, texture_size);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_3D, null);
+
+    const bakeFBO = gl.createFramebuffer();
+    const uSliceZ = gl.getUniformLocation(bakerProgram, "uSliceZ");
+
+    // ---- Initial bake ----
+    bakeTexture(gl, bakerProgram, bakerVao, bakeFBO, voronoiTexture, texture_size, uSliceZ);
 
     // ---- Sidebar UI ----
     const seedList = document.getElementById("seed-list");
     for (let i = 0; i < seeds.length; i++) {
         const row = document.createElement("label");
         row.className = "seed-toggle";
-        
+
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.checked = enables[i];
         cb.onchange = (e) => {
             enables[i] = e.target.checked;
-            gl.useProgram(voronoi_program);
-            updateVoronoiMask(gl, low_mask_voronoi, high_mask_voronoi, enables);
+            // TODO: seed mask will be checked by the raycast shader, not the bake shader.
+            // No need to re-bake here — the 3D texture stores cell indices, not colors.
         };
-        
+
         row.appendChild(cb);
         row.appendChild(document.createTextNode(`Seed ${i} (${seeds[i].join(', ')})`));
         seedList.appendChild(row);
     }
-
-    setAttribute(gl, points_buffer, aPosition_voronoi, 3);
-
-    gl.bindVertexArray(null);
 
     // ---- GL state ----
     gl.clearColor(0.04, 0.04, 0.06, 1.0);
@@ -407,18 +401,18 @@ function createVoronoiPoints(resolution) {
     gl.enable(gl.CULL_FACE);
 
     // ---- Matrices ----
-    const proj  = mat4Create();
-    const view  = mat4Create();
-    const mv    = mat4Create();
-    const mvp   = mat4Create();
-    const norm  = mat4Create();
+    const proj = mat4Create();
+    const view = mat4Create();
+    const mv   = mat4Create();
+    const mvp  = mat4Create();
+    const norm = mat4Create();
 
     // ---- Render loop ----
     const input = window.inputState || { deltaX: 0, deltaY: 0, velocityX: 0, velocityY: 0, zoom: 7, interacting: false };
 
     // Persistent model rotation matrix — accumulated over time
     const modelRotation = mat4Create();
-    const temp = mat4Create();   // scratch matrix for pre-multiplication
+    const temp = mat4Create();
 
     // Apply an initial tilt so we see three faces
     mat4RotateX(modelRotation, modelRotation, 0.35);
@@ -427,13 +421,11 @@ function createVoronoiPoints(resolution) {
         let dx = 0, dy = 0;
 
         if (input.interacting) {
-            // Consume the deltas that input.js accumulated this frame
             dx = input.deltaX;
             dy = input.deltaY;
             input.deltaX = 0;
             input.deltaY = 0;
         } else {
-            // Apply momentum from last pan velocity
             dx = input.velocityX;
             dy = input.velocityY;
             input.velocityX *= 0.95;
@@ -442,14 +434,10 @@ function createVoronoiPoints(resolution) {
             if (Math.abs(input.velocityY) < 0.0001) input.velocityY = 0;
         }
 
-        // Apply incremental rotation in VIEW space (pre-multiply)
-        // This ensures dragging always rotates relative to the screen,
-        // regardless of the cube's current orientation.
         if (dx !== 0 || dy !== 0) {
             const inc = mat4Create();
-            mat4RotateY(inc, inc, dx);   // horizontal drag → rotate around screen Y
-            mat4RotateX(inc, inc, dy);   // vertical drag   → rotate around screen X
-            // Pre-multiply: inc * modelRotation → temp, then copy back
+            mat4RotateY(inc, inc, dx);
+            mat4RotateX(inc, inc, dy);
             mat4Multiply(temp, inc, modelRotation);
             modelRotation.set(temp);
         }
@@ -478,21 +466,16 @@ function createVoronoiPoints(resolution) {
         // Normal matrix (inverse-transpose of model-view)
         mat4InverseTranspose(norm, mv);
 
-        // Draw
-        gl.bindVertexArray(box_vao);
-        gl.useProgram(box_program)
+        // Draw box wireframe
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.bindVertexArray(boxVao);
+        gl.useProgram(boxProgram);
         gl.uniformMatrix4fv(uMVP, false, mvp);
         gl.uniformMatrix4fv(uNormal, false, norm);
         gl.drawElements(gl.LINES, box.count, gl.UNSIGNED_SHORT, 0);
-
-        gl.disable(gl.CULL_FACE);
-        gl.bindVertexArray(voronoi_vao);
-        gl.useProgram(voronoi_program);
-        gl.uniformMatrix4fv(uMVP_voronoi, false, mvp);
-        gl.drawArrays(gl.POINTS, 0, voronoi_points.length / 3);
         gl.bindVertexArray(null);
-        gl.enable(gl.CULL_FACE);
+
+        // TODO: Draw raycast pass here (sample voronoiTexture)
 
         requestAnimationFrame(frame);
     }

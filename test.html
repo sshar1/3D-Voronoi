@@ -87,87 +87,52 @@
     }
 </script>
 
-<!-- ============ Voronoi Shaders (GLSL 300 es) ============ -->
+<!-- ============ Texture Baker Shaders (GLSL 300 es) ============ -->
 
-<script id="vshader-voronoi" type="x-shader/x-vertex">#version 300 es
-    #define MAX_POINTS 64
-
-    in vec3 aPosition;
-
-    uniform mat4 uModelViewProjection;
-
-    // Uniform Block: array of Voronoi seed points
-    layout(std140) uniform VoronoiPoints {
-        int  uNumPoints;             // 16 bytes (std140 pads int to 16)
-        vec4 uPoints[MAX_POINTS];    // vec4 for std140 alignment, use .xyz
-    };
-
-    out vec3 vWorldPos;
-
+<script id="texture-baker-vertex" type="x-shader/x-vertex">#version 300 es
+    in vec2 aPosition;
+    out vec2 vUV;
+    
     void main() {
-        vWorldPos = aPosition;
-        gl_Position = uModelViewProjection * vec4(aPosition, 1.0);
-        gl_PointSize = 6.0;
+        vUV = aPosition;
+        gl_Position = vec4(aPosition, 0.0, 1.0);
     }
 </script>
 
-<script id="fshader-voronoi" type="x-shader/x-fragment">#version 300 es
+<script id="texture-baker-fragment" type="x-shader/x-fragment">#version 300 es
     precision highp float;
     precision highp int;
 
     #define MAX_POINTS 64
 
-    // Same uniform block available in fragment shader
     layout(std140) uniform VoronoiPoints {
         int  uNumPoints;
         vec4 uPoints[MAX_POINTS];
     };
 
-    uniform uint uSeedMaskLow;
-    uniform uint uSeedMaskHigh;
+    uniform float uSliceZ;
 
-    in vec3 vWorldPos;
+    in vec2 vUV;
     out vec4 fragColor;
 
-    bool isEnabled(int index) {
-        if (index < 32) {
-            return ((uSeedMaskLow >> uint(index)) & 1u) != 0u;
-        } else {
-            return ((uSeedMaskHigh >> uint(index - 32)) & 1u) != 0u;
-        }
-    }
-
     void main() {
-        // Find the closest Voronoi seed point to this fragment's world position
+        vec3 worldPos = vec3(vUV, uSliceZ);
+
         float minDist = 1e10;
         int closestIdx = 0;
 
         for (int i = 0; i < MAX_POINTS; i++) {
             if (i >= uNumPoints) break;
-            //float d = distance(vWorldPos, uPoints[i].xyz);
-            float d = dot(vWorldPos - uPoints[i].xyz, vWorldPos - uPoints[i].xyz);
+            float d = dot(worldPos - uPoints[i].xyz, worldPos - uPoints[i].xyz);
             if (d < minDist) {
                 minDist = d;
                 closestIdx = i;
             }
         }
 
-        if (minDist < 0.003) {
-            fragColor = vec4(1.0, 1.0, 1.0, 1.0);
-        } else if (isEnabled(closestIdx)) {
-            // Color based on closest point index (simple hash)
-            float hue = float(closestIdx) * 0.618033988749895;
-            vec3 color = 0.5 + 0.5 * cos(6.2831853 * (hue + vec3(0.0, 0.33, 0.67)));
-            fragColor = vec4(color, 1.0);
-        }
+        fragColor = vec4(float(closestIdx) / 255.0, 0.0, 0.0, 1.0);
     }
 </script>
-
-<!--TODO
-Instead of drawing the gl_points, we will output the colors to a 3d texutre.
-This 3d texture is used as a lookup table for the second shader in the pipeline
-that casts a ray from the camera to every pixel on the surface of the box.
--->
 
 <div id="sidebar">
     <h3>Seed Points</h3>
