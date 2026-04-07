@@ -113,6 +113,14 @@ function mat4InverseTranspose(out, m) {
     return out;
 }
 
+function mat4Transpose(out, m) {
+    out[0] = m[0]; out[1] = m[4]; out[2] = m[8]; out[3] = m[12];
+    out[4] = m[1]; out[5] = m[5]; out[6] = m[9]; out[7] = m[13];
+    out[8] = m[2]; out[9] = m[6]; out[10] = m[10]; out[11] = m[14];
+    out[12] = m[3]; out[13] = m[7]; out[14] = m[11]; out[15] = m[15];
+    return out;
+}
+
 
 // ============================================================
 //  Box geometry
@@ -288,6 +296,21 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
     gl.enable(gl.DEPTH_TEST);
 }
 
+function updateSeedMask(gl, low_uniform, high_uniform, enables) {
+    let maskLow = 0;
+    for (let i = 0; i < 32; i++) {
+        if (enables[i]) maskLow |= (1 << i);
+    }
+
+    let maskHigh = 0;
+    for (let i = 0; i < 32; i++) {
+        if (enables[i + 32]) maskHigh |= (1 << i);
+    }
+
+    gl.uniform1ui(low_uniform, maskLow >>> 0);
+    gl.uniform1ui(high_uniform, maskHigh >>> 0);
+}
+
 
 // ============================================================
 //  Main
@@ -303,7 +326,7 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
 
     const input = window.inputState || { deltaX: 0, deltaY: 0, velocityX: 0, velocityY: 0, zoom: 7, interacting: false };
     let cam_pos = [0, 0, input.zoom];
-    const texture_size = 64;
+    const texture_size = 300;
 
     // ---- Seeds ----
     const seeds = [
@@ -352,19 +375,6 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
 
     gl.bindVertexArray(null);
 
-    // --- Raymarch VAO ---
-    const raycastVao = gl.createVertexArray();
-    gl.bindVertexArray(raycastVao);
-    gl.useProgram(raymarchProgram);
-
-    const faceBuf = createBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, box.triangle_indices);
-
-    setAttribute(gl, posBuf, gl.getAttribLocation(raymarchProgram, "aPosition"), 3);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, faceBuf);
-
-    const uMVP_ray = gl.getUniformLocation(raymarchProgram, "uMVP");
-    gl.bindVertexArray(null);
-
     // ---- Baker VAO (full-screen quad) ----
     const bakerVao = gl.createVertexArray();
     gl.bindVertexArray(bakerVao);
@@ -381,7 +391,7 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
     // ---- 3D Texture ----
     const voronoiTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_3D, voronoiTexture);
-    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA8, texture_size, texture_size, texture_size);
+    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8UI, texture_size, texture_size, texture_size);
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -395,6 +405,30 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
     // ---- Initial bake ----
     bakeTexture(gl, bakerProgram, bakerVao, bakeFBO, voronoiTexture, texture_size, uSliceZ);
 
+    // --- Raymarch VAO ---
+    const raycastVao = gl.createVertexArray();
+    gl.bindVertexArray(raycastVao);
+    gl.useProgram(raymarchProgram);
+
+    const faceBuf = createBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, box.triangle_indices);
+
+    setAttribute(gl, posBuf, gl.getAttribLocation(raymarchProgram, "aPosition"), 3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, faceBuf);
+
+    const uMVP_ray = gl.getUniformLocation(raymarchProgram, "uMVP");
+    const uCameraPos_ray = gl.getUniformLocation(raymarchProgram, "uCameraPos");
+    const uSeedMaskLow = gl.getUniformLocation(raymarchProgram, "uSeedMaskLow");
+    const uSeedMaskHigh = gl.getUniformLocation(raymarchProgram, "uSeedMaskHigh");
+    const uVolumeTexture = gl.getUniformLocation(raymarchProgram, "uVolumeTexture");
+
+    gl.uniform1i(uVolumeTexture, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_3D, voronoiTexture);
+
+    gl.uniform1f(gl.getUniformLocation(raymarchProgram, "uTextureRes"), texture_size);
+    updateSeedMask(gl, uSeedMaskLow, uSeedMaskHigh, enables);
+    gl.bindVertexArray(null);
+
     // ---- Sidebar UI ----
     const seedList = document.getElementById("seed-list");
     for (let i = 0; i < seeds.length; i++) {
@@ -406,8 +440,8 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
         cb.checked = enables[i];
         cb.onchange = (e) => {
             enables[i] = e.target.checked;
-            // TODO: seed mask will be checked by the raycast shader, not the bake shader.
-            // No need to re-bake here — the 3D texture stores cell indices, not colors.
+            gl.useProgram(raymarchProgram);
+            updateSeedMask(gl, uSeedMaskLow, uSeedMaskHigh, enables);
         };
 
         row.appendChild(cb);
@@ -485,6 +519,16 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
         // Normal matrix (inverse-transpose of model-view)
         mat4InverseTranspose(norm, mv);
 
+        // Camera in model space
+        let cam_pos_model = []
+        let modelRotationInv = mat4Create();
+        mat4Transpose(modelRotationInv, modelRotation);
+        cam_pos_model = [
+            cam_pos[0] * modelRotationInv[0] + cam_pos[1] * modelRotationInv[4] + cam_pos[2] * modelRotationInv[8] + modelRotationInv[12],
+            cam_pos[0] * modelRotationInv[1] + cam_pos[1] * modelRotationInv[5] + cam_pos[2] * modelRotationInv[9] + modelRotationInv[13],
+            cam_pos[0] * modelRotationInv[2] + cam_pos[1] * modelRotationInv[6] + cam_pos[2] * modelRotationInv[10] + modelRotationInv[14],
+        ]
+
         // Draw box wireframe
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         gl.bindVertexArray(boxVao);
@@ -498,6 +542,7 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
         gl.bindVertexArray(raycastVao);
         gl.useProgram(raymarchProgram);
         gl.uniformMatrix4fv(uMVP_ray, false, mvp);
+        gl.uniform3fv(uCameraPos_ray, cam_pos_model);
         gl.disable(gl.CULL_FACE);
         gl.drawElements(gl.TRIANGLES, box.triangle_count, gl.UNSIGNED_SHORT, 0);
         gl.enable(gl.CULL_FACE);
