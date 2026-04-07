@@ -350,6 +350,7 @@ function updateSeedMask(gl, low_uniform, high_uniform, enables) {
     // ---- UBO setup ----
     const voronoiUBO = createVoronoiUBO(gl);
     bindVoronoiUBOToProgram(gl, bakerProgram);
+    bindVoronoiUBOToProgram(gl, raymarchProgram);
     updateVoronoiPoints(gl, voronoiUBO, seeds);
 
     // ---- Box VAO ----
@@ -417,6 +418,7 @@ function updateSeedMask(gl, low_uniform, high_uniform, enables) {
 
     const uMVP_ray = gl.getUniformLocation(raymarchProgram, "uMVP");
     const uCameraPos_ray = gl.getUniformLocation(raymarchProgram, "uCameraPos");
+    const uLightDir_ray = gl.getUniformLocation(raymarchProgram, "uLightDir");
     const uSeedMaskLow = gl.getUniformLocation(raymarchProgram, "uSeedMaskLow");
     const uSeedMaskHigh = gl.getUniformLocation(raymarchProgram, "uSeedMaskHigh");
     const uVolumeTexture = gl.getUniformLocation(raymarchProgram, "uVolumeTexture");
@@ -482,6 +484,12 @@ function updateSeedMask(gl, low_uniform, high_uniform, enables) {
     // Projection
     const aspect = canvas.width / canvas.height;
     mat4Perspective(proj, Math.PI / 6, aspect, 0.1, 100);
+    
+    // Pre-allocated model-space vectors for raymarching
+    const modelRotationInv = mat4Create();
+    const camPosModel = new Float32Array(3);
+    const lightDirModel = new Float32Array(3);
+    const lightDirWorld = [0.0, 1.0, 1.0];  // world-space light direction
 
     function frame() {
         let dx = 0, dy = 0;
@@ -520,14 +528,15 @@ function updateSeedMask(gl, low_uniform, high_uniform, enables) {
         mat4InverseTranspose(norm, mv);
 
         // Camera in model space
-        let cam_pos_model = []
-        let modelRotationInv = mat4Create();
         mat4Transpose(modelRotationInv, modelRotation);
-        cam_pos_model = [
-            cam_pos[0] * modelRotationInv[0] + cam_pos[1] * modelRotationInv[4] + cam_pos[2] * modelRotationInv[8] + modelRotationInv[12],
-            cam_pos[0] * modelRotationInv[1] + cam_pos[1] * modelRotationInv[5] + cam_pos[2] * modelRotationInv[9] + modelRotationInv[13],
-            cam_pos[0] * modelRotationInv[2] + cam_pos[1] * modelRotationInv[6] + cam_pos[2] * modelRotationInv[10] + modelRotationInv[14],
-        ]
+        camPosModel[0] = cam_pos[0] * modelRotationInv[0] + cam_pos[1] * modelRotationInv[4] + cam_pos[2] * modelRotationInv[8] + modelRotationInv[12];
+        camPosModel[1] = cam_pos[0] * modelRotationInv[1] + cam_pos[1] * modelRotationInv[5] + cam_pos[2] * modelRotationInv[9] + modelRotationInv[13];
+        camPosModel[2] = cam_pos[0] * modelRotationInv[2] + cam_pos[1] * modelRotationInv[6] + cam_pos[2] * modelRotationInv[10] + modelRotationInv[14];
+
+        // Light direction in model space (rotation only, no translation — it's a direction, not a point)
+        lightDirModel[0] = lightDirWorld[0] * modelRotationInv[0] + lightDirWorld[1] * modelRotationInv[4] + lightDirWorld[2] * modelRotationInv[8];
+        lightDirModel[1] = lightDirWorld[0] * modelRotationInv[1] + lightDirWorld[1] * modelRotationInv[5] + lightDirWorld[2] * modelRotationInv[9];
+        lightDirModel[2] = lightDirWorld[0] * modelRotationInv[2] + lightDirWorld[1] * modelRotationInv[6] + lightDirWorld[2] * modelRotationInv[10];
 
         // Draw box wireframe
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -541,8 +550,11 @@ function updateSeedMask(gl, low_uniform, high_uniform, enables) {
         // Raycast pass
         gl.bindVertexArray(raycastVao);
         gl.useProgram(raymarchProgram);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_3D, voronoiTexture);
         gl.uniformMatrix4fv(uMVP_ray, false, mvp);
-        gl.uniform3fv(uCameraPos_ray, cam_pos_model);
+        gl.uniform3fv(uCameraPos_ray, camPosModel);
+        gl.uniform3fv(uLightDir_ray, lightDirModel);
         gl.disable(gl.CULL_FACE);
         gl.drawElements(gl.TRIANGLES, box.triangle_count, gl.UNSIGNED_SHORT, 0);
         gl.enable(gl.CULL_FACE);

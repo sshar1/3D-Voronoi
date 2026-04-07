@@ -163,14 +163,24 @@
     precision highp float;
     precision highp usampler3D;
 
+    #define MAX_POINTS 64
+
     in vec3 vModelPos;
     out vec4 fragColor;
 
     uniform vec3 uCameraPos;
+    uniform vec3 uLightDir;
     uniform uint uSeedMaskLow;
     uniform uint uSeedMaskHigh;
     uniform usampler3D uVolumeTexture;
     uniform float uTextureRes;
+
+    layout(std140) uniform VoronoiPoints {
+        int  uNumPoints;
+        vec4 uPoints[MAX_POINTS];
+    };
+
+    const int MAX_STEPS = 128;
 
     bool isEnabled(uint index) {
         if (index < 32u) {
@@ -199,6 +209,15 @@
        return color; 
     }
 
+    // Compute the cube face normal from the ray entry point.
+    // The axis component closest to ±1 identifies which face was hit.
+    vec3 cubeNormal(vec3 entryPos) {
+        vec3 a = abs(entryPos);
+        if (a.x > a.y && a.x > a.z) return vec3(sign(entryPos.x), 0.0, 0.0);
+        if (a.y > a.z)              return vec3(0.0, sign(entryPos.y), 0.0);
+                                    return vec3(0.0, 0.0, sign(entryPos.z));
+    }
+
     void main() {
         vec3 ray_dir = normalize(vModelPos - uCameraPos);
 
@@ -208,16 +227,40 @@
             discard;
         }
 
-        float step = 1.0 / uTextureRes;
-        for (float s = t.x; s < t.y; s+= step) {
+        float ray_len = t.y - t.x;
+        float step = ray_len / float(MAX_STEPS);
+        uint prev_index = 0u;
+        bool hit_prev = false;
+
+        for (int i = 0; i < MAX_STEPS; i++) {
+            float s = t.x + float(i) * step;
             vec3 pos = uCameraPos + ray_dir * s;
             vec3 uvw = pos * 0.5 + 0.5;
 
             uint index = texture(uVolumeTexture, uvw).r;
 
             if (isEnabled(index)) {
-                fragColor = vec4(cellColor(int(index)), 1.0);
+                vec3 normal;
+                if (hit_prev) {
+                    // Cell boundary: perpendicular bisector between the two seeds
+                    normal = normalize(uPoints[prev_index].xyz - uPoints[index].xyz);
+                } else {
+                    // Cube entry face
+                    vec3 entry_pos = uCameraPos + ray_dir * t.x;
+                    normal = cubeNormal(entry_pos);
+                }
+
+                // Ensure normal faces toward the camera
+                if (dot(normal, ray_dir) > 0.0) normal = -normal;
+
+                float diffuse = max(dot(normal, uLightDir), 0.0);
+                float light = 0.35 + 0.65 * diffuse;  // ambient + diffuse
+                fragColor = vec4(cellColor(int(index)) * light, 1.0);
                 return;
+            }
+            else {
+                prev_index = index;
+                hit_prev = true;
             }
         }
         
