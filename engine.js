@@ -29,9 +29,9 @@ function mat4Create() {
 function mat4Multiply(out, a, b) {
     for (let i = 0; i < 4; i++) {
         const a0 = a[i], a4 = a[i + 4], a8 = a[i + 8], a12 = a[i + 12];
-        out[i]      = a0 * b[0]  + a4 * b[1]  + a8 * b[2]  + a12 * b[3];
-        out[i + 4]  = a0 * b[4]  + a4 * b[5]  + a8 * b[6]  + a12 * b[7];
-        out[i + 8]  = a0 * b[8]  + a4 * b[9]  + a8 * b[10] + a12 * b[11];
+        out[i] = a0 * b[0] + a4 * b[1] + a8 * b[2] + a12 * b[3];
+        out[i + 4] = a0 * b[4] + a4 * b[5] + a8 * b[6] + a12 * b[7];
+        out[i + 8] = a0 * b[8] + a4 * b[9] + a8 * b[10] + a12 * b[11];
         out[i + 12] = a0 * b[12] + a4 * b[13] + a8 * b[14] + a12 * b[15];
     }
     return out;
@@ -42,8 +42,8 @@ function mat4Perspective(out, fovY, aspect, near, far) {
     const f = 1.0 / Math.tan(fovY / 2);
     const nf = 1 / (near - far);
     out.fill(0);
-    out[0]  = f / aspect;
-    out[5]  = f;
+    out[0] = f / aspect;
+    out[5] = f;
     out[10] = (far + near) * nf;
     out[11] = -1;
     out[14] = 2 * far * near * nf;
@@ -93,22 +93,22 @@ function mat4InverseTranspose(out, m) {
     const m02 = m[8], m12 = m[9], m22 = m[10];  // column 2
 
     const det = m00 * (m11 * m22 - m12 * m21)
-              - m01 * (m10 * m22 - m12 * m20)
-              + m02 * (m10 * m21 - m11 * m20);
+        - m01 * (m10 * m22 - m12 * m20)
+        + m02 * (m10 * m21 - m11 * m20);
     const id = 1.0 / det;
 
     // The inverse-transpose = cofactor matrix / determinant.
     // Store in column-major: out[col*4 + row] = Cofactor[row][col] / det
     out.fill(0);
-    out[0]  =  (m11 * m22 - m12 * m21) * id;
-    out[1]  = -(m01 * m22 - m02 * m21) * id;
-    out[2]  =  (m01 * m12 - m02 * m11) * id;
-    out[4]  = -(m10 * m22 - m12 * m20) * id;
-    out[5]  =  (m00 * m22 - m02 * m20) * id;
-    out[6]  = -(m00 * m12 - m02 * m10) * id;
-    out[8]  =  (m10 * m21 - m11 * m20) * id;
-    out[9]  = -(m00 * m21 - m01 * m20) * id;
-    out[10] =  (m00 * m11 - m01 * m10) * id;
+    out[0] = (m11 * m22 - m12 * m21) * id;
+    out[1] = -(m01 * m22 - m02 * m21) * id;
+    out[2] = (m01 * m12 - m02 * m11) * id;
+    out[4] = -(m10 * m22 - m12 * m20) * id;
+    out[5] = (m00 * m22 - m02 * m20) * id;
+    out[6] = -(m00 * m12 - m02 * m10) * id;
+    out[8] = (m10 * m21 - m11 * m20) * id;
+    out[9] = -(m00 * m21 - m01 * m20) * id;
+    out[10] = (m00 * m11 - m01 * m10) * id;
     out[15] = 1;
     return out;
 }
@@ -122,18 +122,19 @@ function createBox() {
     // 6 faces, each with 4 unique vertices (for flat normals), 2 triangles
     const faceData = [
         // positions (4 verts)           normal           color
-        { verts: [[-1,-1, 1],[ 1,-1, 1],[ 1, 1, 1],[-1, 1, 1]], n: [ 0, 0, 1], color: [0.30, 0.60, 1.00] },  // front  – blue
-        { verts: [[ 1,-1,-1],[-1,-1,-1],[-1, 1,-1],[ 1, 1,-1]], n: [ 0, 0,-1], color: [0.20, 0.80, 0.50] },  // back   – green
-        { verts: [[-1, 1, 1],[ 1, 1, 1],[ 1, 1,-1],[-1, 1,-1]], n: [ 0, 1, 0], color: [1.00, 0.35, 0.40] },  // top    – red
-        { verts: [[-1,-1,-1],[ 1,-1,-1],[ 1,-1, 1],[-1,-1, 1]], n: [ 0,-1, 0], color: [1.00, 0.75, 0.20] },  // bottom – gold
-        { verts: [[ 1,-1, 1],[ 1,-1,-1],[ 1, 1,-1],[ 1, 1, 1]], n: [ 1, 0, 0], color: [0.85, 0.30, 0.90] },  // right  – purple
-        { verts: [[-1,-1,-1],[-1,-1, 1],[-1, 1, 1],[-1, 1,-1]], n: [-1, 0, 0], color: [0.10, 0.85, 0.85] },  // left   – cyan
+        { verts: [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]], n: [0, 0, 1], color: [0.30, 0.60, 1.00] },  // front  – blue
+        { verts: [[1, -1, -1], [-1, -1, -1], [-1, 1, -1], [1, 1, -1]], n: [0, 0, -1], color: [0.20, 0.80, 0.50] },  // back   – green
+        { verts: [[-1, 1, 1], [1, 1, 1], [1, 1, -1], [-1, 1, -1]], n: [0, 1, 0], color: [1.00, 0.35, 0.40] },  // top    – red
+        { verts: [[-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1]], n: [0, -1, 0], color: [1.00, 0.75, 0.20] },  // bottom – gold
+        { verts: [[1, -1, 1], [1, -1, -1], [1, 1, -1], [1, 1, 1]], n: [1, 0, 0], color: [0.85, 0.30, 0.90] },  // right  – purple
+        { verts: [[-1, -1, -1], [-1, -1, 1], [-1, 1, 1], [-1, 1, -1]], n: [-1, 0, 0], color: [0.10, 0.85, 0.85] },  // left   – cyan
     ];
 
     const positions = [];
-    const normals   = [];
-    const colors    = [];
-    const indices   = [];
+    const normals = [];
+    const colors = [];
+    const line_indices = [];
+    const triangle_indices = [];
 
     faceData.forEach((face, i) => {
         const base = i * 4;
@@ -144,15 +145,18 @@ function createBox() {
         });
 
         // Lines
-        indices.push(base, base + 1, base + 1, base + 2, base + 2, base + 3, base + 3, base);
+        line_indices.push(base, base + 1, base + 1, base + 2, base + 2, base + 3, base + 3, base);
+        triangle_indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
     });
 
     return {
         positions: new Float32Array(positions),
-        normals:   new Float32Array(normals),
-        colors:    new Float32Array(colors),
-        indices:   new Uint16Array(indices),
-        count:     indices.length,
+        normals: new Float32Array(normals),
+        colors: new Float32Array(colors),
+        line_indices: new Uint16Array(line_indices),
+        triangle_indices: new Uint16Array(triangle_indices),
+        line_count: line_indices.length,
+        triangle_count: triangle_indices.length,
     };
 }
 
@@ -248,7 +252,7 @@ function updateVoronoiPoints(gl, ubo, points) {
 
     for (let i = 0; i < count; i++) {
         const offset = 16 + i * 16;
-        dataView.setFloat32(offset,     points[i][0], true);
+        dataView.setFloat32(offset, points[i][0], true);
         dataView.setFloat32(offset + 4, points[i][1], true);
         dataView.setFloat32(offset + 8, points[i][2], true);
         dataView.setFloat32(offset + 12, 0.0, true);
@@ -297,25 +301,28 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
         return;
     }
 
+    const input = window.inputState || { deltaX: 0, deltaY: 0, velocityX: 0, velocityY: 0, zoom: 7, interacting: false };
+    let cam_pos = [0, 0, input.zoom];
     const texture_size = 64;
 
     // ---- Seeds ----
     const seeds = [
-        [ 0.5,  0.3,  0.2],
-        [-0.4,  0.7, -0.3],
-        [ 0.1, -0.6,  0.8],
-        [-0.8,  0.2,  0.5],
-        [ 0.3, -0.4, -0.7],
-        [-0.2, -0.8,  0.1],
-        [ 0.7,  0.5, -0.4],
-        [-0.6,  0.1,  0.9],
+        [0.5, 0.3, 0.2],
+        [-0.4, 0.7, -0.3],
+        [0.1, -0.6, 0.8],
+        [-0.8, 0.2, 0.5],
+        [0.3, -0.4, -0.7],
+        [-0.2, -0.8, 0.1],
+        [0.7, 0.5, -0.4],
+        [-0.6, 0.1, 0.9],
         [0, 0, 0],
     ];
     const enables = Array(64).fill(true);
 
     // ---- Shader programs ----
-    const boxProgram   = createProgram(gl, "vshader-box", "fshader-box");
+    const boxProgram = createProgram(gl, "vshader-box", "fshader-box");
     const bakerProgram = createProgram(gl, "texture-baker-vertex", "texture-baker-fragment");
+    const raymarchProgram = createProgram(gl, "raymarch-vertex", "raymarch-fragment");
 
     // ---- UBO setup ----
     const voronoiUBO = createVoronoiUBO(gl);
@@ -331,18 +338,31 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
     const posBuf = createBuffer(gl, gl.ARRAY_BUFFER, box.positions);
     const nrmBuf = createBuffer(gl, gl.ARRAY_BUFFER, box.normals);
     const colBuf = createBuffer(gl, gl.ARRAY_BUFFER, box.colors);
-    const idxBuf = createBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, box.indices);
+    const idxBuf = createBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, box.line_indices);
 
     setAttribute(gl, posBuf, gl.getAttribLocation(boxProgram, "aPosition"), 3);
-    setAttribute(gl, nrmBuf, gl.getAttribLocation(boxProgram, "aNormal"),   3);
-    setAttribute(gl, colBuf, gl.getAttribLocation(boxProgram, "aColor"),    3);
+    setAttribute(gl, nrmBuf, gl.getAttribLocation(boxProgram, "aNormal"), 3);
+    setAttribute(gl, colBuf, gl.getAttribLocation(boxProgram, "aColor"), 3);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
 
-    const uMVP     = gl.getUniformLocation(boxProgram, "uModelViewProjection");
-    const uNormal  = gl.getUniformLocation(boxProgram, "uNormalMatrix");
+    const uMVP = gl.getUniformLocation(boxProgram, "uModelViewProjection");
+    const uNormal = gl.getUniformLocation(boxProgram, "uNormalMatrix");
     const uLightDir = gl.getUniformLocation(boxProgram, "uLightDir");
     gl.uniform3f(uLightDir, 0, 0.7, 1.0);
 
+    gl.bindVertexArray(null);
+
+    // --- Raymarch VAO ---
+    const raycastVao = gl.createVertexArray();
+    gl.bindVertexArray(raycastVao);
+    gl.useProgram(raymarchProgram);
+
+    const faceBuf = createBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, box.triangle_indices);
+
+    setAttribute(gl, posBuf, gl.getAttribLocation(raymarchProgram, "aPosition"), 3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, faceBuf);
+
+    const uMVP_ray = gl.getUniformLocation(raymarchProgram, "uMVP");
     gl.bindVertexArray(null);
 
     // ---- Baker VAO (full-screen quad) ----
@@ -350,8 +370,8 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
     gl.bindVertexArray(bakerVao);
 
     const quadVerts = new Float32Array([
-        -1, -1,   1, -1,   1, 1,
-        -1, -1,   1,  1,  -1, 1,
+        -1, -1, 1, -1, 1, 1,
+        -1, -1, 1, 1, -1, 1,
     ]);
     const quadBuf = createBuffer(gl, gl.ARRAY_BUFFER, quadVerts);
     setAttribute(gl, quadBuf, gl.getAttribLocation(bakerProgram, "aPosition"), 2);
@@ -403,12 +423,10 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
     // ---- Matrices ----
     const proj = mat4Create();
     const view = mat4Create();
-    const mv   = mat4Create();
-    const mvp  = mat4Create();
+    const mv = mat4Create();
+    const mvp = mat4Create();
     const norm = mat4Create();
 
-    // ---- Render loop ----
-    const input = window.inputState || { deltaX: 0, deltaY: 0, velocityX: 0, velocityY: 0, zoom: 7, interacting: false };
 
     // Persistent model rotation matrix — accumulated over time
     const modelRotation = mat4Create();
@@ -416,6 +434,20 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
 
     // Apply an initial tilt so we see three faces
     mat4RotateX(modelRotation, modelRotation, 0.35);
+
+    // Resize canvas to match display size (handles high-DPI)
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth * dpr | 0;
+    const h = canvas.clientHeight * dpr | 0;
+    if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+    }
+    gl.viewport(0, 0, canvas.width, canvas.height);
+
+    // Projection
+    const aspect = canvas.width / canvas.height;
+    mat4Perspective(proj, Math.PI / 6, aspect, 0.1, 100);
 
     function frame() {
         let dx = 0, dy = 0;
@@ -443,21 +475,8 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
         }
 
         // Update view matrix with current zoom
-        mat4LookAt(view, [0, 0, input.zoom], [0, 0, 0], [0, 1, 0]);
-
-        // Resize canvas to match display size (handles high-DPI)
-        const dpr = window.devicePixelRatio || 1;
-        const w = canvas.clientWidth  * dpr | 0;
-        const h = canvas.clientHeight * dpr | 0;
-        if (canvas.width !== w || canvas.height !== h) {
-            canvas.width = w;
-            canvas.height = h;
-        }
-        gl.viewport(0, 0, canvas.width, canvas.height);
-
-        // Projection
-        const aspect = canvas.width / canvas.height;
-        mat4Perspective(proj, Math.PI / 6, aspect, 0.1, 100);
+        cam_pos = [0, 0, input.zoom];
+        mat4LookAt(view, cam_pos, [0, 0, 0], [0, 1, 0]);
 
         // MVP
         mat4Multiply(mv, view, modelRotation);
@@ -472,10 +491,17 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
         gl.useProgram(boxProgram);
         gl.uniformMatrix4fv(uMVP, false, mvp);
         gl.uniformMatrix4fv(uNormal, false, norm);
-        gl.drawElements(gl.LINES, box.count, gl.UNSIGNED_SHORT, 0);
+        gl.drawElements(gl.LINES, box.line_count, gl.UNSIGNED_SHORT, 0);
         gl.bindVertexArray(null);
 
-        // TODO: Draw raycast pass here (sample voronoiTexture)
+        // Raycast pass
+        gl.bindVertexArray(raycastVao);
+        gl.useProgram(raymarchProgram);
+        gl.uniformMatrix4fv(uMVP_ray, false, mvp);
+        gl.disable(gl.CULL_FACE);
+        gl.drawElements(gl.TRIANGLES, box.triangle_count, gl.UNSIGNED_SHORT, 0);
+        gl.enable(gl.CULL_FACE);
+        gl.bindVertexArray(null);
 
         requestAnimationFrame(frame);
     }

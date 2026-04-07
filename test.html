@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="user-scalable=no, width=device-width, initial-scale=1, maximum-scale=1">
     <title>WebGL Spinning Box</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             background: #0a0a0f;
             display: flex;
@@ -14,12 +20,14 @@
             height: 100vh;
             overflow: hidden;
         }
+
         canvas {
             width: 80vmin;
             height: 80vmin;
             border-radius: 12px;
             touch-action: none;
         }
+
         #sidebar {
             position: absolute;
             right: 0;
@@ -34,10 +42,12 @@
             font-family: sans-serif;
             z-index: 10;
         }
+
         #sidebar h3 {
             margin-bottom: 20px;
             color: #fff;
         }
+
         .seed-toggle {
             display: flex;
             align-items: center;
@@ -45,17 +55,19 @@
             cursor: pointer;
             font-size: 14px;
         }
+
         .seed-toggle input {
             margin-right: 12px;
             cursor: pointer;
         }
     </style>
 </head>
+
 <body>
 
-<!-- ============ Box Shaders (GLSL 300 es) ============ -->
+    <!-- ============ Box Shaders (GLSL 300 es) ============ -->
 
-<script id="vshader-box" type="x-shader/x-vertex">#version 300 es
+    <script id="vshader-box" type="x-shader/x-vertex">#version 300 es
     in vec3 aPosition;
     in vec3 aNormal;
     in vec3 aColor;
@@ -75,7 +87,7 @@
     }
 </script>
 
-<script id="fshader-box" type="x-shader/x-fragment">#version 300 es
+    <script id="fshader-box" type="x-shader/x-fragment">#version 300 es
     precision mediump float;
 
     in float vDot;
@@ -87,9 +99,9 @@
     }
 </script>
 
-<!-- ============ Texture Baker Shaders (GLSL 300 es) ============ -->
+    <!-- ============ Texture Baker Shaders (GLSL 300 es) ============ -->
 
-<script id="texture-baker-vertex" type="x-shader/x-vertex">#version 300 es
+    <script id="texture-baker-vertex" type="x-shader/x-vertex">#version 300 es
     in vec2 aPosition;
     out vec2 vUV;
     
@@ -99,7 +111,7 @@
     }
 </script>
 
-<script id="texture-baker-fragment" type="x-shader/x-fragment">#version 300 es
+    <script id="texture-baker-fragment" type="x-shader/x-fragment">#version 300 es
     precision highp float;
     precision highp int;
 
@@ -134,14 +146,39 @@
     }
 </script>
 
-<div id="sidebar">
-    <h3>Seed Points</h3>
-    <div id="seed-list"></div>
-</div>
+    <script id="raymarch-vertex" type="x-shader/x-vertex">#version 300 es
+    in vec3 aPosition;
 
-<canvas id="glcanvas"></canvas>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
-<script src="input.js"></script>
-<script src="engine.js"></script>
+    uniform mat4 uMVP;
+
+    out vec3 vModelPos;
+
+    void main() {
+        vModelPos = aPosition;
+        gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+</script>
+
+    <script id="raymarch-fragment" type="x-shader/x-fragment">#version 300 es
+    precision highp float;
+
+    in vec3 vModelPos;
+    out vec4 fragColor;
+
+    void main() {
+        fragColor = vec4(vModelPos * 0.5 + 0.5, 1.0);
+    }
+</script>
+
+    <div id="sidebar">
+        <h3>Seed Points</h3>
+        <div id="seed-list"></div>
+    </div>
+
+    <canvas id="glcanvas"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    <script src="input.js"></script>
+    <script src="engine.js"></script>
 </body>
+
 </html>
