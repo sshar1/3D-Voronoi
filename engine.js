@@ -224,9 +224,17 @@ function setAttribute(gl, buffer, location, size) {
 // ============================================================
 
 const MAX_POINTS = 64;
-// std140 layout: 16 bytes for int (padded), then 64 * 16 bytes for vec4 array
-const UBO_SIZE = 16 + MAX_POINTS * 16;
+// std140 layout: int(16) + vec4 points[64](1024) + vec4 colors[64](1024)
+const UBO_SIZE = 16 + MAX_POINTS * 16 * 2;
 const VORONOI_BINDING_POINT = 0;
+
+function hexToRGB(hex) {
+    return [
+        parseInt(hex.slice(1, 3), 16) / 255,
+        parseInt(hex.slice(3, 5), 16) / 255,
+        parseInt(hex.slice(5, 7), 16) / 255,
+    ];
+}
 
 function createVoronoiUBO(gl) {
     const ubo = gl.createBuffer();
@@ -246,24 +254,36 @@ function bindVoronoiUBOToProgram(gl, program) {
     }
 }
 
-// Upload an array of [x,y,z] points to the UBO
-function updateVoronoiPoints(gl, ubo, points) {
-    const count = Math.min(points.length, MAX_POINTS);
+// Upload seed positions and colors to the UBO
+function updateVoronoiPoints(gl, ubo, seeds) {
+    const count = Math.min(seeds.length, MAX_POINTS);
 
-    // Build the std140-aligned buffer:
-    // Bytes 0-3:   int numPoints
-    // Bytes 4-15:  padding
-    // Bytes 16+:   vec4[MAX_POINTS] (each 16 bytes, w unused)
+    // std140 layout:
+    //   Bytes 0-3:    int numPoints
+    //   Bytes 4-15:   padding
+    //   Bytes 16+:    vec4 uPoints[64]  (positions)
+    //   Bytes 1040+:  vec4 uColors[64]  (colors)
     const buffer = new ArrayBuffer(UBO_SIZE);
     const dataView = new DataView(buffer);
     dataView.setInt32(0, count, true);
 
+    const colorsStart = 16 + MAX_POINTS * 16;
+
     for (let i = 0; i < count; i++) {
-        const offset = 16 + i * 16;
-        dataView.setFloat32(offset, points[i][0], true);
-        dataView.setFloat32(offset + 4, points[i][1], true);
-        dataView.setFloat32(offset + 8, points[i][2], true);
-        dataView.setFloat32(offset + 12, 0.0, true);
+        // Position
+        const pOff = 16 + i * 16;
+        dataView.setFloat32(pOff,     seeds[i].pos[0], true);
+        dataView.setFloat32(pOff + 4, seeds[i].pos[1], true);
+        dataView.setFloat32(pOff + 8, seeds[i].pos[2], true);
+        dataView.setFloat32(pOff + 12, 0.0, true);
+
+        // Color
+        const cOff = colorsStart + i * 16;
+        const rgb = hexToRGB(seeds[i].color);
+        dataView.setFloat32(cOff,     rgb[0], true);
+        dataView.setFloat32(cOff + 4, rgb[1], true);
+        dataView.setFloat32(cOff + 8, rgb[2], true);
+        dataView.setFloat32(cOff + 12, 1.0, true);
     }
 
     gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
@@ -294,6 +314,7 @@ function bakeTexture(gl, program, vao, framebuffer, texture, textureSize, uSlice
     gl.bindVertexArray(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 }
 
 function updateSeedMask(gl, low_uniform, high_uniform, enables) {
@@ -309,6 +330,175 @@ function updateSeedMask(gl, low_uniform, high_uniform, enables) {
 
     gl.uniform1ui(low_uniform, maskLow >>> 0);
     gl.uniform1ui(high_uniform, maskHigh >>> 0);
+}
+
+function updateSeedUI(ctx) {
+    const {
+        gl, raymarchProgram, seeds, enables,
+        uSeedMaskLow, uSeedMaskHigh, voronoiUBO,
+        bakerProgram, bakerVao, bakeFBO,
+        voronoiTexture, texture_size, uSliceZ,
+    } = ctx;
+
+    // Update header count
+    const countEl = document.getElementById('seed-count');
+    if (countEl) {
+        countEl.textContent = `${seeds.length} seed${seeds.length !== 1 ? 's' : ''}`;
+    }
+
+    const seedList = document.getElementById("seed-list");
+    seedList.innerHTML = "";
+
+    for (let i = 0; i < seeds.length; i++) {
+        const seed = seeds[i];
+        const card = document.createElement('div');
+        card.className = 'seed-card';
+
+        // Header row: toggle, color swatch, label, delete
+        const header = document.createElement('div');
+        header.className = 'seed-card-header';
+
+        // Toggle switch
+        const toggle = document.createElement('label');
+        toggle.className = 'toggle-switch';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = enables[i];
+        cb.onchange = (e) => {
+            enables[i] = e.target.checked;
+            gl.useProgram(raymarchProgram);
+            updateSeedMask(gl, uSeedMaskLow, uSeedMaskHigh, enables);
+        };
+        const slider = document.createElement('span');
+        slider.className = 'toggle-slider';
+        toggle.appendChild(cb);
+        toggle.appendChild(slider);
+
+        // Color swatch
+        const swatch = document.createElement('div');
+        swatch.className = 'color-swatch';
+        swatch.style.background = seed.color;
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.value = seed.color;
+        colorInput.oninput = (e) => {
+            seed.color = e.target.value;
+            swatch.style.background = e.target.value;
+            updateVoronoiPoints(gl, voronoiUBO, seeds);
+        };
+        swatch.appendChild(colorInput);
+
+        // Label
+        const label = document.createElement('span');
+        label.className = 'seed-card-label';
+        label.textContent = `Seed ${i}`;
+
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.innerHTML = '&#10005;';
+        deleteBtn.onclick = () => {
+            seeds.splice(i, 1);
+            enables.splice(i, 1);
+            enables.push(true);
+            updateVoronoiPoints(gl, voronoiUBO, seeds);
+            gl.useProgram(raymarchProgram);
+            updateSeedMask(gl, uSeedMaskLow, uSeedMaskHigh, enables);
+            bakeTexture(gl, bakerProgram, bakerVao, bakeFBO,
+                voronoiTexture, texture_size, uSliceZ);
+            updateSeedUI(ctx);
+        };
+
+        header.appendChild(toggle);
+        header.appendChild(swatch);
+        header.appendChild(label);
+        header.appendChild(deleteBtn);
+
+        // Coordinates row
+        const coords = document.createElement('div');
+        coords.className = 'seed-card-coords';
+        const p = seed.pos;
+        coords.textContent = `(${p[0].toFixed(2)}, ${p[1].toFixed(2)}, ${p[2].toFixed(2)})`;
+
+        card.appendChild(header);
+        card.appendChild(coords);
+        seedList.appendChild(card);
+    }
+}
+
+function setupAddSeedForm(ctx) {
+    const {
+        gl, raymarchProgram, seeds, enables,
+        uSeedMaskLow, uSeedMaskHigh, voronoiUBO,
+        bakerProgram, bakerVao, bakeFBO,
+        voronoiTexture, texture_size, uSliceZ,
+    } = ctx;
+
+    const section = document.getElementById('add-seed-section');
+
+    // Title
+    const title = document.createElement('div');
+    title.className = 'add-seed-title';
+    title.textContent = 'New Seed';
+    section.appendChild(title);
+
+    // Coordinate inputs
+    const inputsGrid = document.createElement('div');
+    inputsGrid.className = 'add-seed-inputs';
+
+    const inputs = {};
+    ['X', 'Y', 'Z'].forEach(axis => {
+        const group = document.createElement('div');
+        group.className = 'coord-input-group';
+        const lbl = document.createElement('label');
+        lbl.textContent = axis;
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.step = '0.1';
+        inp.min = '-1';
+        inp.max = '1';
+        inp.value = '0';
+        group.appendChild(lbl);
+        group.appendChild(inp);
+        inputsGrid.appendChild(group);
+        inputs[axis] = inp;
+    });
+    section.appendChild(inputsGrid);
+
+    // Color picker + add button row
+    const row = document.createElement('div');
+    row.className = 'add-seed-row';
+
+    const colorDiv = document.createElement('div');
+    colorDiv.className = 'add-seed-color';
+    colorDiv.style.background = '#ffffff';
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = '#ffffff';
+    colorInput.oninput = (e) => {
+        colorDiv.style.background = e.target.value;
+    };
+    colorDiv.appendChild(colorInput);
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'add-btn';
+    addBtn.textContent = '+ Add Seed';
+    addBtn.onclick = () => {
+        const x = Math.max(-1, Math.min(1, parseFloat(inputs.X.value) || 0));
+        const y = Math.max(-1, Math.min(1, parseFloat(inputs.Y.value) || 0));
+        const z = Math.max(-1, Math.min(1, parseFloat(inputs.Z.value) || 0));
+        seeds.push({ pos: [x, y, z], color: colorInput.value });
+        updateVoronoiPoints(gl, voronoiUBO, seeds);
+        gl.useProgram(raymarchProgram);
+        updateSeedMask(gl, uSeedMaskLow, uSeedMaskHigh, enables);
+        bakeTexture(gl, bakerProgram, bakerVao, bakeFBO,
+            voronoiTexture, texture_size, uSliceZ);
+        updateSeedUI(ctx);
+    };
+
+    row.appendChild(colorDiv);
+    row.appendChild(addBtn);
+    section.appendChild(row);
 }
 
 
@@ -330,15 +520,15 @@ function updateSeedMask(gl, low_uniform, high_uniform, enables) {
 
     // ---- Seeds ----
     const seeds = [
-        [0.5, 0.3, 0.2],
-        [-0.4, 0.7, -0.3],
-        [0.1, -0.6, 0.8],
-        [-0.8, 0.2, 0.5],
-        [0.3, -0.4, -0.7],
-        [-0.2, -0.8, 0.1],
-        [0.7, 0.5, -0.4],
-        [-0.6, 0.1, 0.9],
-        [0, 0, 0],
+        { pos: [0.5, 0.3, 0.2],   color: '#4A90D9' },
+        { pos: [-0.4, 0.7, -0.3], color: '#E74C3C' },
+        { pos: [0.1, -0.6, 0.8],  color: '#2ECC71' },
+        { pos: [-0.8, 0.2, 0.5],  color: '#F39C12' },
+        { pos: [0.3, -0.4, -0.7], color: '#9B59B6' },
+        { pos: [-0.2, -0.8, 0.1], color: '#1ABC9C' },
+        { pos: [0.7, 0.5, -0.4],  color: '#E91E63' },
+        { pos: [-0.6, 0.1, 0.9],  color: '#FF9800' },
+        { pos: [0, 0, 0],         color: '#00BCD4' },
     ];
     const enables = Array(64).fill(true);
 
@@ -432,24 +622,23 @@ function updateSeedMask(gl, low_uniform, high_uniform, enables) {
     gl.bindVertexArray(null);
 
     // ---- Sidebar UI ----
-    const seedList = document.getElementById("seed-list");
-    for (let i = 0; i < seeds.length; i++) {
-        const row = document.createElement("label");
-        row.className = "seed-toggle";
-
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = enables[i];
-        cb.onchange = (e) => {
-            enables[i] = e.target.checked;
-            gl.useProgram(raymarchProgram);
-            updateSeedMask(gl, uSeedMaskLow, uSeedMaskHigh, enables);
-        };
-
-        row.appendChild(cb);
-        row.appendChild(document.createTextNode(`Seed ${i} (${seeds[i].join(', ')})`));
-        seedList.appendChild(row);
-    }
+    const ctx = {
+        gl,
+        raymarchProgram,
+        seeds,
+        enables,
+        uSeedMaskLow,
+        uSeedMaskHigh,
+        voronoiUBO,
+        bakerProgram,
+        bakerVao,
+        bakeFBO,
+        voronoiTexture,
+        texture_size,
+        uSliceZ,
+    };
+    updateSeedUI(ctx);
+    setupAddSeedForm(ctx);
 
     // ---- GL state ----
     gl.clearColor(0.04, 0.04, 0.06, 1.0);
